@@ -1,0 +1,397 @@
+---
+title: "30538 Problem Set 3: git Solution "
+date: "2024-10-24"
+author: "Penny Shi"
+format: 
+    html:
+        code-overflow: wrap 
+execute:
+  eval: true
+  echo: true
+include-before-body:
+  text: |
+    \RecustomVerbatimEnvironment{verbatim}{Verbatim}{
+      showspaces = false,
+      showtabs = false,
+      breaksymbolleft={},
+      breaklines
+      }
+---
+1. "This submission is my work alone and complies with the 30538 integrity
+policy: PS" 
+2. "I have uploaded the names of anyone I worked with on the problem set: Yes"  
+
+**PS4:** Due Sat Nov 2 at 5:00PM Central. Worth 100 points. 
+
+## Style Points (10 pts)
+
+## Submission Steps (10 pts)
+
+## Download and explore the Provider of Services (POS) file (10 pts)
+
+1. I pulled 'PRVDR_CTGRY_CD','PRVDR_CTGRY_SBTYP_CD', 'PRVDR_NUM', AND 'PGM_TRMNTN_CD', 'FAC_NAME', 'ZIP_CD' from the dataset. 
+2. 
+    a.
+```{python}
+import pandas as pd
+import altair as alt
+
+df_2016 = pd.read_csv('/Users/jackychen/Desktop/2016.csv')
+
+df_2016_filter = df_2016[(df_2016['PRVDR_CTGRY_SBTYP_CD'] ==1) & (df_2016['PRVDR_CTGRY_CD'] ==1 )]
+print(df_2016_filter.columns)
+df_2016_filter.shape[0]
+```
+
+    b.
+According to the data, there are 7245 hospitals in the subset of data. However, according to the article provided by the problem set, there are around 5000 short-term, acute care hospitals in the United States. I would say that there are some differences in between, around 2245. 
+
+One reason this difference exists is probably that the data reported in the article has been processed to eliminate some amount of hositals based on certain criteria, causing the number to be smaller than that in the dataset.
+
+3. 
+```{python}
+df_2017 = pd.read_csv('/Users/jackychen/Desktop/2017.csv') 
+df_2018 = pd.read_csv('/Users/jackychen/Desktop/2018.csv', encoding='latin1')
+df_2019 = pd.read_csv('/Users/jackychen/Desktop/2019.csv', encoding='latin1')
+
+df_2017_filter = df_2017[(df_2017['PRVDR_CTGRY_SBTYP_CD'] ==1) & (df_2017['PRVDR_CTGRY_CD'] ==1 )]
+df_2018_filter = df_2018[(df_2018['PRVDR_CTGRY_SBTYP_CD'] ==1) & (df_2018['PRVDR_CTGRY_CD'] ==1 )]
+df_2019_filter = df_2019[(df_2019['PRVDR_CTGRY_SBTYP_CD'] ==1) & (df_2019['PRVDR_CTGRY_CD'] ==1 )]
+
+#Create 'year' column to indicate the year
+df_2016_filter['year'] = 2016
+df_2017_filter['year'] = 2017
+df_2018_filter['year'] = 2018
+df_2019_filter['year'] = 2019
+
+merged_df = pd.concat([df_2016_filter, df_2017_filter, df_2018_filter, df_2019_filter], ignore_index=True)
+
+#Create count by year 
+count_year = merged_df.groupby('year').size().reset_index(name='count')
+
+# Create a bar chart using Altair
+chart = alt.Chart(count_year).mark_bar().encode(
+    x=alt.X('year:O', title='Year'), 
+    y=alt.Y('count:Q', title='Number of Observations'),  
+    color='year:O' 
+).properties(
+    title='Number of Observations by Year',
+    width=400,
+    height=300
+)
+chart
+```
+
+
+4. 
+    a.
+```{python}
+# Count unique hospitals per year
+unique_count = (
+    merged_df.groupby('year')['PRVDR_NUM']
+    .nunique()
+    .reset_index(name='unique_hospitals')
+)
+
+# Plotting the number of unique hospitals per year
+unique_hospital_chart = alt.Chart(unique_count).mark_bar().encode(
+    x=alt.X('year:O', title='Year'),
+    y=alt.Y('unique_hospitals:Q', title='Number of Unique Hospitals'),
+    color=alt.value('green')  
+).properties(
+    title='Number of Unique Hospitals per Year',
+    width=400,
+    height=300
+)
+
+# Display the chart
+unique_hospital_chart
+```
+
+b.The graph looks roughly the same as the one before. It tells us that the data structure is very complete, with each hospital corresponding to an unique CMS. 
+
+## Identify hospital closures in POS file (15 pts) (*)
+
+1. 
+```{python}
+# Filter for active hospitals in 2016
+active_hospitals_2016 = merged_df[(merged_df['year'] == 2016) & (merged_df['PGM_TRMNTN_CD'] == 0)]
+
+# Step 2: Find hospitals suspected to have closed by 2019
+active_hospital = active_hospitals_2016['PRVDR_NUM'].unique()
+
+closed_hospitals = merged_df[(merged_df['PRVDR_NUM'].isin(active_hospital)) & (merged_df['year'] >= 2017) & (merged_df['PGM_TRMNTN_CD'] != 0)]
+
+#Display the suspected closed hospital record
+hospital_closed_record = closed_hospitals[['FAC_NAME', 'ZIP_CD', 'year']].copy()
+
+hospital_closed_record = hospital_closed_record.groupby(['FAC_NAME', 'ZIP_CD']).first().reset_index()
+
+hospital_closed_record
+hospital_closed_record.shape[0]
+```
+There were 177 hospitals closed that fit for the criteria.
+
+2. 
+```{python}
+hospital_closed_record.head(10)
+```
+Here are the 10 hospitals, containing the names and year of suspected closure. 
+
+3. 
+    a.
+```{python}
+# Check if the number of active hospitals in the same ZIP code decreased the following year by creating a for loop
+
+## Create a dictionary to store the number of active hospitals 
+active_hospitals_by_zip_year = (
+    merged_df[merged_df['PGM_TRMNTN_CD'] == 0]
+    .groupby(['ZIP_CD', 'year'])
+    .size()
+    .unstack(fill_value=0)
+)
+
+potential_mergers = []
+for _, row in closed_hospitals.iterrows():
+    zip_code = row['ZIP_CD']
+    year_of_closure = row['year']
+    
+    if year_of_closure + 1 in active_hospitals_by_zip_year.columns:
+        current_count = active_hospitals_by_zip_year.loc[zip_code, year_of_closure]
+        next_year_count = active_hospitals_by_zip_year.loc[zip_code, year_of_closure + 1]
+        
+        if next_year_count >= current_count:
+            potential_mergers.append(row['PRVDR_NUM'])
+
+potential_mergers_num = len(potential_mergers)
+potential_mergers_num
+```
+Potential mergers are 136. 
+
+b.
+```{python}
+# Remove potential mergers from suspected closures and count remaining suspected closures
+corrected_closures = closed_hospitals[~closed_hospitals['PRVDR_NUM'].isin(potential_mergers)]
+
+corrected_closures_num = corrected_closures.shape[0]
+corrected_closures_num
+```
+There are 78 hospitals left. 
+
+c.
+```{python}
+# Sort corrected closures by facility name and display the first 10 rows
+closures_table = corrected_closures.sort_values(by='FAC_NAME').head(10)
+closures_table
+```
+Here are the 10 rows of the data. 
+
+## Download Census zip code shapefile (10 pt) 
+
+1. 
+    a.
+shp has feature geometrics,
+shx has a positional index,
+dbf has attribute information
+prj has the Coordinate information
+xml is structured text file for storing and transporting data in a way that is readable for both humans and machine
+
+    b. 
+```{python}
+import geopandas as gpd
+filepath = "/Users/jackychen/Desktop/gz_2010_us_860_00_500k/gz_2010_us_860_00_500k.shp"
+data_gpd= gpd.read_file(filepath)
+data_gpd.columns
+```
+```{python}
+# Step 1: change column name
+data_gpd = data_gpd.rename(columns={'ZCTA5': 'ZIP_CD'})
+
+# Filter for Texas zip codes in the range 750-799, and ensure zip code is zero-padded to 5 digits
+data_gpd['ZIP_CD'] = data_gpd['ZIP_CD'].astype(str).str.zfill(5)
+texas_zipcodes = data_gpd[data_gpd['ZIP_CD'].str.startswith(tuple(map(str, range(750, 800))))]
+
+# Step 2: Convert ZIP_CD in df_2016_filter to string and zero-pad to 5 digits
+df_2016_filter['ZIP_CD'] = df_2016_filter['ZIP_CD'].astype(str).str.zfill(5)
+
+# Step 3: Count hospitals by zip code
+# hospital_counts = df_2016_filter.groupby('ZIP_CD').size().reset_index(name='hospital_count')
+
+# Step 4: Merge hospital counts with the Texas zip codes GeoDataFrame
+texas_zip_hospitals = texas_zipcodes.merge(df_2016_filter, on='ZIP_CD', how='left')
+
+# Group by 'ZIP_CD' and count the occurrences
+hospital_counts_by_zip = texas_zip_hospitals.groupby('ZIP_CD').size().reset_index(name='count')
+
+# Display the result
+print(hospital_counts_by_zip.head(10))
+
+```
+
+2. 
+```{python}
+import matplotlib.pyplot as plt
+
+# Ensure that both DataFrames are using the same ZIP_CD format (as strings)
+hospital_counts_by_zip['ZIP_CD'] = hospital_counts_by_zip['ZIP_CD'].astype(str).str.zfill(5)
+
+# Merge the hospital counts with the Texas zip codes GeoDataFrame
+texas_hospitals_geo = texas_zip_hospitals.merge(hospital_counts_by_zip, on='ZIP_CD', how='left')
+
+# Fill NaN values in 'count' with 0 for visualization purposes
+texas_hospitals_geo['count'] = texas_hospitals_geo['count'].fillna(0)
+
+# Plotting the choropleth map
+fig, ax = plt.subplots(1, 1, figsize=(12, 10))
+texas_hospitals_geo.plot(column='count', 
+                         cmap='Blues', 
+                         linewidth=0.8, 
+                         edgecolor='0.8', 
+                         legend=True, 
+                         ax=ax)
+
+ax.set_title("Number of Hospitals by Zip Code in Texas", fontsize=16)
+ax.set_xlabel("Longitude")
+ax.set_ylabel("Latitude")
+plt.axis('equal') 
+
+# Show the plot
+plt.show()
+```
+
+## Calculate zip code’s distance to the nearest hospital (20 pts) (*)
+1. 
+```{python}
+zips_all_centroids = data_gpd.copy()
+zips_all_centroids['geometry'] = zips_all_centroids.centroid
+print("Dimensions of the GeoDataFrame:", zips_all_centroids.shape)
+```
+There are five variables in this datafra - GEO_ID', 'ZCTA5', 'NAME', 'LSAD', 'CENSUSAREA', 'geometry'(the variable I just created)
+GEO_ID: A unique identifier for each geographic area
+ZCTA5: zip codes, short for 'Zip Code Tabulation Area 5-digit'.
+NAME: same as the ZCTA5, also represent the zipcode	
+LSAD: this is the short name for 'Legal/Statistical Area Description'. This code gives us types of geographic areas, and we can notice a lot of ZCTA5 in this column, which indicates that the area represents a ZIP Code Tabulation Area, designed for demographic analysis.
+CENSUSAREA: this represents the land area of the zip code tabulation area in square miles, usually defined by the boundary of ZCTA.	
+Geometry: contain the points of centroids that describe the polygons outlining the boundaries of each ZCTA. 
+2. 
+```{python}
+
+# Extract zip codes in Texas based on the 733 prefix and the 750-799 prefix range
+zips_texas_centroids = zips_all_centroids[
+    zips_all_centroids['ZIP_CD'].str.startswith(('733', '75', '76', '77', '78', '79'))
+]
+
+# Extract zip codes in Texas and bordering states based on the 700-799 prefix range
+zips_texas_borderstates_centroids = zips_all_centroids[zips_all_centroids['ZIP_CD'].str.startswith(tuple(map(str, range(700, 800))))]
+```
+```{python}
+# Then, we get the unique value for each subset. 
+texas_zips_unique = zips_texas_centroids['ZIP_CD'].nunique()
+border_states_zips_unique = zips_texas_borderstates_centroids['ZIP_CD'].nunique()
+
+print(texas_zips_unique)
+print(border_states_zips_unique)
+```
+In texas_zips, there are 1935 unique value.
+In border_state_zips, there are 3689 unique value. 
+
+3. 
+```{python}
+
+zips_withhospital_centroids = zips_texas_borderstates_centroids.merge(df_2016_filter , on='ZIP_CD', how='left')
+
+hospital_by_zip_centroids = zips_withhospital_centroids.groupby('ZIP_CD').size().reset_index(name='count')
+
+hospital_by_zip_centroids = hospital_by_zip_centroids[hospital_by_zip_centroids['count'] > 0]
+hospital_by_zip_centroids.head(10)
+
+```
+I did a left merge on the common key 'ZIP CD', later grouping them by zip code to get the counts of hospital per zip code. 
+
+
+
+4. 
+    a.
+```{python}
+import time
+```
+```{python}
+zips_texas_subset = zips_texas_centroids.sample(n=10, random_state=42)
+# Create function to compute the distance from each ZIP code to the nearest hospital ZIP code
+def get_min_distance(zip_centroids, hospital_centroids):
+    distances = hospital_centroids.distance(zip_centroids)
+    return distances.min()
+
+start_time = time.time()
+
+# Now, we the function to calculate minimum distances for the subset of ZIP codes. 
+zips_texas_subset['Min_Distance'] = zips_texas_subset['geometry'].apply(
+    lambda centroid: get_min_distance(centroid, zips_withhospital_centroids['geometry'])
+)
+
+end_time = time.time()
+elapsed_time = end_time - start_time
+
+print(zips_texas_subset[['ZIP_CD', 'Min_Distance']])
+```
+```{python}
+# Print the time needed 
+print(f"Time taken for processing 10 ZIP codes: {elapsed_time:.2f} seconds") 
+print(f"Estimated time for the entire dataset: {elapsed_time * (len(zips_texas_centroids) / 10):.2f} seconds")
+```
+
+# Optionally, filter for the relevant columns
+result = nearest_hospital[['ZIP_CD', 'Min_Distance']]
+print(result)
+
+    b.
+```{python}
+zips_texas_centroids['Min_Distance'] = zips_texas_centroids['geometry'].apply(
+    lambda centroid: get_min_distance(centroid, zips_withhospital_centroids['geometry'])
+)
+print(zips_texas_centroids[['ZIP_CD', 'Min_Distance']])
+```
+For the time that it takes whole dataset to run, I time the running process using phone's timer. It took around 8-10 second, so I would say that it takes less time than I estimated it to be!
+
+    c.
+After doing some research, we can see that the prj file's unit is degree. According to the internet, one degree covers about 111 kilometers (69 miles). So we can use the amount of degrees* 69 to find the corresponding miles. 
+
+5. 
+    a. unit 
+    b. average distance in mile
+```{python}
+
+# Calculate the minimum distance to nearest hospital for each ZIP code
+zips_texas_centroids['Min_Distance'] = zips_texas_centroids.geometry.apply(
+    lambda x: zips_withhospital_centroids.distance(x).min()
+)
+
+# Convert from meters to miles if necessary
+# 1 degree = 69 miles
+zips_texas_centroids['Min_Distance_Miles'] = zips_texas_centroids['Min_Distance'] * 69
+
+# Calculate the average distance to nearest hospital
+average_distance = zips_texas_centroids['Min_Distance_Miles'].mean()
+print(f"Average distance to nearest hospital: {average_distance:.2f} miles")
+```
+
+    c. map the value 
+```{python}
+# Plotting ZIP codes and coloring by average distance
+fig, ax = plt.subplots(1, 1, figsize=(15, 10))
+zips_texas_centroids.plot(column='Min_Distance_Miles', ax=ax, legend=True,
+                legend_kwds={'label': "Distance to Nearest Hospital (miles)",
+                             'orientation': "horizontal"})
+plt.title("Average Distance to Nearest Hospital by ZIP Code in Texas")
+plt.show()
+```
+
+## Effects of closures on access in Texas (15 pts)
+
+1. 
+2. 
+3. 
+4. 
+
+## Reflecting on the exercise (10 pts) 
+  
